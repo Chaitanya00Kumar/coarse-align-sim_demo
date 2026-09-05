@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <vector>
 #include <random>
+#include <fstream>
 
 // ---------- Simple 2D Kalman Filter (constant velocity model) ----------
 struct KalmanFilter2D
@@ -20,13 +21,12 @@ struct KalmanFilter2D
 
     void predict()
     {
-        // x = F * x   (F: constant velocity model)
+        // x = F * x (F: constant velocity model)
         double px = x[0] + x[2] * dt;
         double py = x[1] + x[3] * dt;
         x[0] = px;
         x[1] = py;
-
-        // P = F P F^T + Q   (simplified diagonal-ish update, good enough for demo)
+        // P = F P F^T + Q (simplified diagonal-ish update, good enough for demo)
         for (int i = 0; i < 4; i++)
             P[i][i] += processNoise;
     }
@@ -45,15 +45,12 @@ struct KalmanFilter2D
         // Kalman gain (simplified scalar per-dimension gain)
         double Kx = P[0][0] / (P[0][0] + measNoise);
         double Ky = P[1][1] / (P[1][1] + measNoise);
-
         double innov_x = zx - x[0];
         double innov_y = zy - x[1];
-
         x[0] += Kx * innov_x;
         x[1] += Ky * innov_y;
         x[2] += (Kx * innov_x) / dt * 0.3; // velocity nudge from residual
         x[3] += (Ky * innov_y) / dt * 0.3;
-
         P[0][0] *= (1 - Kx);
         P[1][1] *= (1 - Ky);
     }
@@ -117,6 +114,10 @@ int main()
     std::cout << "Frame | TrueTarget(x,y) | Detected(x,y) | KalmanEst(x,y) | Pan | Tilt\n";
     std::cout << "---------------------------------------------------------------------------\n";
 
+    // --- NEW: CSV output for the performance-graphing script ---
+    std::ofstream csv("tracking_data.csv");
+    csv << "frame,true_x,true_y,detected,det_x,det_y,est_x,est_y,pan,tilt\n";
+
     for (int frame = 0; frame < 90; frame++)
     {
         double t = frame * dt;
@@ -148,22 +149,29 @@ int main()
         // --- pan-tilt control: drive error (estimated pos - frame center) to zero ---
         double errorX = estX - centerX;
         double errorY = estY - centerY;
-
         double panAdjust = panPID.update(errorX, dt);
         double tiltAdjust = tiltPID.update(errorY, dt);
-
         panServo.moveBy(-panAdjust * dt); // negative: move opposite to error to recenter
         tiltServo.moveBy(tiltAdjust * dt);
 
         // --- print this frame's data ---
         std::cout << std::setw(5) << frame << " | "
                   << "(" << std::setw(5) << trueX << "," << std::setw(5) << trueY << ") | "
-                  << (detected ? "(" : "  MISSED   ")
+                  << (detected ? "(" : " MISSED ")
                   << (detected ? (std::to_string((int)detX) + "," + std::to_string((int)detY) + ")") : "")
                   << " | (" << std::setw(5) << estX << "," << std::setw(5) << estY << ") | "
                   << std::setw(5) << panServo.angle << "|" << std::setw(5) << tiltServo.angle
                   << "\n";
+
+        // --- NEW: write this frame's data to the CSV too ---
+        csv << frame << "," << trueX << "," << trueY << ","
+            << (detected ? 1 : 0) << ","
+            << (detected ? detX : 0) << "," << (detected ? detY : 0) << ","
+            << estX << "," << estY << ","
+            << panServo.angle << "," << tiltServo.angle << "\n";
     }
+
+    csv.close(); // --- NEW: finish writing the CSV ---
 
     std::cout << "\nDemo complete. Kalman filter smoothed noisy detections,\n";
     std::cout << "predicted through the missed-detection frame, and pan/tilt\n";
