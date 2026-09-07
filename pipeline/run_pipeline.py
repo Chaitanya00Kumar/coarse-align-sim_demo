@@ -2,6 +2,7 @@ import subprocess, sys, platform, os
 
 # --- these must match your actual filenames exactly ---
 SCENE_SCRIPT = "scene_simulator.py"
+DETECTOR_SCRIPT = "detector.py"
 TRACKER_SOURCE = "tracker.cpp"
 ANALYSIS_SCRIPT = "performance_analyser.py"
 
@@ -20,14 +21,17 @@ def run_step(name, command):
 # 1. Scene generator — produces frames/ and ground_truth.csv
 run_step("Scene generator", [sys.executable, SCENE_SCRIPT])
 
-# 2. Compile the tracker
-compile_cmd = ["g++", TRACKER_SOURCE, "-o", "tracker.exe" if IS_WINDOWS else "tracker"]
+# 2. Detector — scans frames/ and produces detections.csv
+run_step("Detector", [sys.executable, DETECTOR_SCRIPT])
+
+# 3. Compile the tracker
+compile_cmd = ["g++", "-std=c++17", "-O2", TRACKER_SOURCE, "-o", "tracker.exe" if IS_WINDOWS else "tracker"]
 run_step("Compiling tracker", compile_cmd)
 
-# 3. Run the tracker — produces tracking_data.csv
+# 4. Run the tracker — reads ground_truth.csv + detections.csv, produces tracking_data.csv
 run_step("Running tracker", [TRACKER_BINARY])
 
-# 4. Performance analysis — produces performance_report.png
+# 5. Performance analysis — produces performance_report.png
 run_step("Performance analysis", [sys.executable, ANALYSIS_SCRIPT])
 
 print("\nPipeline complete. Check performance_report.png for results.")

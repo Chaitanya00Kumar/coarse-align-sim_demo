@@ -2,8 +2,10 @@
 #include <cmath>
 #include <iomanip>
 #include <vector>
-#include <random>
 #include <fstream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
 
 // ---------- Simple 2D Kalman Filter (constant velocity model) ----------
 struct KalmanFilter2D
@@ -94,55 +96,131 @@ struct Servo
     }
 };
 
+// ---------- Minimal CSV loading ----------
+struct GroundTruthRow { double x, y; };
+struct DetectionRow { bool detected; double x, y; };
+
+static std::vector<std::string> splitCsv(const std::string &line)
+{
+    std::vector<std::string> fields;
+    std::stringstream ss(line);
+    std::string field;
+    while (std::getline(ss, field, ','))
+        fields.push_back(field);
+    return fields;
+}
+
+static std::unordered_map<int, GroundTruthRow> loadGroundTruth(const std::string &path)
+{
+    std::unordered_map<int, GroundTruthRow> rows;
+    std::ifstream file(path);
+    if (!file.is_open())
+    {
+        std::cerr << "ERROR: could not open " << path
+                  << " — run scene_simulator.py first.\n";
+        std::exit(1);
+    }
+    std::string line;
+    std::getline(file, line); // header
+    while (std::getline(file, line))
+    {
+        if (line.empty())
+            continue;
+        auto f = splitCsv(line);
+        int frame = std::stoi(f[0]);
+        rows[frame] = {std::stod(f[1]), std::stod(f[2])};
+    }
+    return rows;
+}
+
+static std::unordered_map<int, DetectionRow> loadDetections(const std::string &path)
+{
+    std::unordered_map<int, DetectionRow> rows;
+    std::ifstream file(path);
+    if (!file.is_open())
+    {
+        std::cerr << "ERROR: could not open " << path
+                  << " — run detector.py first.\n";
+        std::exit(1);
+    }
+    std::string line;
+    std::getline(file, line); // header
+    while (std::getline(file, line))
+    {
+        if (line.empty())
+            continue;
+        auto f = splitCsv(line);
+        int frame = std::stoi(f[0]);
+        bool detected = std::stoi(f[1]) != 0;
+        rows[frame] = {detected, std::stod(f[2]), std::stod(f[3])};
+    }
+    return rows;
+}
+
 int main()
 {
-    const double dt = 1.0 / 30.0; // simulate 30 FPS
-    const int frameWidth = 640, frameHeight = 480;
+    const double dt = 1.0 / 60.0; // matches scene_simulator.py's clock.tick(60)
+    const int frameWidth = 640, frameHeight = 480; // matches scene_simulator.py SIM_WIDTH/HEIGHT
     const int centerX = frameWidth / 2, centerY = frameHeight / 2;
+
+    auto groundTruth = loadGroundTruth("ground_truth.csv");
+    auto detections = loadDetections("detections.csv");
+
+    if (groundTruth.empty())
+    {
+        std::cerr << "ERROR: ground_truth.csv has no rows.\n";
+        return 1;
+    }
+
+    int firstFrame = groundTruth.begin()->first, lastFrame = groundTruth.begin()->first;
+    for (const auto &kv : groundTruth)
+    {
+        firstFrame = std::min(firstFrame, kv.first);
+        lastFrame = std::max(lastFrame, kv.first);
+    }
 
     KalmanFilter2D kf(dt, /*processNoise=*/4.0, /*measNoise=*/25.0);
     PID panPID(0.06, 0.0, 0.015);
     PID tiltPID(0.06, 0.0, 0.015);
     Servo panServo, tiltServo;
 
-    // Simulate a target moving in a circular path across the frame,
-    // with noisy detections (like a real camera detector would produce)
-    std::random_device rd;
-    std::default_random_engine rng(rd());
-    std::normal_distribution<double> noise(0.0, 6.0); // detection noise, px
-
     std::cout << std::fixed << std::setprecision(1);
     std::cout << "Frame | TrueTarget(x,y) | Detected(x,y) | KalmanEst(x,y) | Pan | Tilt\n";
     std::cout << "---------------------------------------------------------------------------\n";
 
-    // --- NEW: CSV output for the performance-graphing script ---
     std::ofstream csv("tracking_data.csv");
     csv << "frame,true_x,true_y,detected,det_x,det_y,est_x,est_y,pan,tilt\n";
 
-    for (int frame = 0; frame < 90; frame++)
+    int missingDetectionRows = 0;
+
+    for (int frame = firstFrame; frame <= lastFrame; frame++)
     {
-        double t = frame * dt;
+        const auto gtIt = groundTruth.find(frame);
+        if (gtIt == groundTruth.end())
+            continue; // shouldn't happen, but skip gracefully
+        double trueX = gtIt->second.x;
+        double trueY = gtIt->second.y;
 
-        // --- simulate true target position: circular motion ---
-        double trueX = centerX + 150 * std::sin(t * 1.5);
-        double trueY = centerY + 100 * std::cos(t * 1.5);
-
-        // --- simulate a noisy "detector" (like color/YOLO detection) ---
-        bool detected = true;
-        if (frame % 15 == 7)
-            detected = false; // simulate occasional missed detection
-
-        double detX = trueX + noise(rng);
-        double detY = trueY + noise(rng);
+        bool detected = false;
+        double detX = 0, detY = 0;
+        const auto detIt = detections.find(frame);
+        if (detIt != detections.end())
+        {
+            detected = detIt->second.detected;
+            detX = detIt->second.x;
+            detY = detIt->second.y;
+        }
+        else
+        {
+            missingDetectionRows++; // detections.csv didn't cover this frame at all
+        }
 
         // --- Kalman predict step (always runs) ---
         kf.predict();
 
         // --- Kalman correct step (only if detection available) ---
         if (detected)
-        {
             kf.correct(detX, detY);
-        }
 
         double estX = kf.getX();
         double estY = kf.getY();
@@ -164,7 +242,6 @@ int main()
                   << std::setw(5) << panServo.angle << "|" << std::setw(5) << tiltServo.angle
                   << "\n";
 
-        // --- NEW: write this frame's data to the CSV too ---
         csv << frame << "," << trueX << "," << trueY << ","
             << (detected ? 1 : 0) << ","
             << (detected ? detX : 0) << "," << (detected ? detY : 0) << ","
@@ -172,11 +249,14 @@ int main()
             << panServo.angle << "," << tiltServo.angle << "\n";
     }
 
-    csv.close(); // --- NEW: finish writing the CSV ---
+    csv.close();
 
     std::cout << "\nDemo complete. Kalman filter smoothed noisy detections,\n";
-    std::cout << "predicted through the missed-detection frame, and pan/tilt\n";
+    std::cout << "predicted through missed-detection frames, and pan/tilt\n";
     std::cout << "servo angles tracked the target toward frame center.\n";
+    if (missingDetectionRows > 0)
+        std::cout << missingDetectionRows << " frame(s) had no row at all in detections.csv "
+                     "(treated as missed detections).\n";
 
     return 0;
 }
