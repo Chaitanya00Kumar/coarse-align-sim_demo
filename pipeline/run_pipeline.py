@@ -1,13 +1,9 @@
-import subprocess, sys, platform, os
+import subprocess, sys
 
-# --- these must match your actual filenames exactly ---
 SCENE_SCRIPT = "scene_simulator.py"
-TRACKER_SOURCE = "tracker.cpp"
+DETECTOR_SCRIPT = "detector.py"
+TRACKER_SCRIPT = "tracker.py"
 ANALYSIS_SCRIPT = "performance_analyser.py"
-
-IS_WINDOWS = platform.system() == "Windows"
-TRACKER_BINARY = os.path.join(".", "tracker.exe" if IS_WINDOWS else "tracker")
-
 
 def run_step(name, command):
     print(f"\n=== {name} ===")
@@ -16,16 +12,14 @@ def run_step(name, command):
         print(f"[FAILED] {name} exited with code {result.returncode} — stopping pipeline.")
         sys.exit(1)
 
-
 # 1. Scene generator — produces frames/ and ground_truth.csv
 run_step("Scene generator", [sys.executable, SCENE_SCRIPT])
 
-# 2. Compile the tracker
-compile_cmd = ["g++", TRACKER_SOURCE, "-o", "tracker.exe" if IS_WINDOWS else "tracker"]
-run_step("Compiling tracker", compile_cmd)
+# 2. Detector — scans frames/ and produces detections.csv
+run_step("Detector", [sys.executable, DETECTOR_SCRIPT])
 
-# 3. Run the tracker — produces tracking_data.csv
-run_step("Running tracker", [TRACKER_BINARY])
+# 3. Tracker — reads ground_truth.csv + detections.csv, produces tracking_data.csv
+run_step("Running tracker", [sys.executable, TRACKER_SCRIPT])
 
 # 4. Performance analysis — produces performance_report.png
 run_step("Performance analysis", [sys.executable, ANALYSIS_SCRIPT])
