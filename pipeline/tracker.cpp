@@ -107,7 +107,8 @@ int main()
 
     // Simulate a target moving in a circular path across the frame,
     // with noisy detections (like a real camera detector would produce)
-    std::default_random_engine rng(42);
+    std::random_device rd;
+    std::default_random_engine rng(rd());
     std::normal_distribution<double> noise(0.0, 6.0); // detection noise, px
 
     std::cout << std::fixed << std::setprecision(1);

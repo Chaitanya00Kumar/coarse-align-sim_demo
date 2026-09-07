@@ -1,4 +1,4 @@
-import pygame, sys, os, shutil, cv2, numpy as np
+import pygame, sys, os, shutil, cv2, numpy as np, random, math
 from disturbance import add_disturbance
 
 ENABLE_DISTURBANCE = True
@@ -15,8 +15,10 @@ shutil.rmtree(frames_dir, ignore_errors=True)
 os.makedirs(frames_dir)
 
 clock = pygame.time.Clock()
-target_pos = [100.0, 240.0]
-velocity = [2.5, 1.2]
+target_pos = [random.uniform(50, SIM_WIDTH - 50), random.uniform(50, SIM_HEIGHT - 50)]
+speed = random.uniform(2.0, 4.0)
+angle = random.uniform(0, 2 * math.pi)
+velocity = [speed * math.cos(angle), speed * math.sin(angle)]
 frame_count = 0
 max_frames = 300
 
