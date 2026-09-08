@@ -6,7 +6,30 @@ import pandas as pd
 import numpy as np
 import cv2
 import os
-from detector import BeaconRegressor
+
+class BeaconRegressor(nn.Module):
+    def __init__(self):
+        super(BeaconRegressor, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1), # 64x64
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1), # 32x32
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), # 16x16
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
+        self.regressor = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 2) # Outputs (x, y) coordinates normalized to [-1, 1]
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = self.regressor(x)
+        return x
 
 class SyntheticBeaconDataset(Dataset):
     def __init__(self, csv_path, frames_dir):
@@ -28,7 +51,6 @@ class SyntheticBeaconDataset(Dataset):
         img = cv2.resize(img, (128, 128))
         tensor_img = torch.tensor(img, dtype=torch.float32).unsqueeze(0) / 255.0
         
-        # Normalize coordinates to [-1, 1]
         x_norm = (row['true_x'] / 640.0) * 2.0 - 1.0
         y_norm = (row['true_y'] / 480.0) * 2.0 - 1.0
         target = torch.tensor([x_norm, y_norm], dtype=torch.float32)
