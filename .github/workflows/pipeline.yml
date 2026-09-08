@@ -33,8 +33,9 @@ jobs:
 
     - name: Execute 6-Scenario Test Matrix
       run: |
-        python pipeline/run_test_matrix.py
-
+        cd pipeline
+        python run_test_matrix.py
+        
     - name: Upload Report Artifacts
       uses: actions/upload-artifact@v4
       with:
